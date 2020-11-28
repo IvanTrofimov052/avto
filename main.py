@@ -16,6 +16,8 @@ from pyglet.window import key
 
 from gym_duckietown.envs import DuckietownEnv
 
+last = 0
+
 # from experiments.utils import save_img
 
 parser = argparse.ArgumentParser()
@@ -80,7 +82,9 @@ key_handler = key.KeyStateHandler()
 env.unwrapped.window.push_handlers(key_handler)
 
 
-def update(dt):
+def update(dt, *nums):
+    global last
+    
     """
     This function is called at every frame to handle
     movement/stepping and redrawing
@@ -94,7 +98,8 @@ def update(dt):
     print(line_pos)
 
     action[0] = 0.44
-    action[1] = 20*line_pos 
+    action[1] = 20*line_pos + 20 * (line_pos-last)/nums[0]
+    last = 20*line_pos + 20 * (line_pos-last)/nums[0]
 
     obs, reward, done, info = env.step(action)
     print("step_count = %s, reward=%.3f" % (env.unwrapped.step_count, reward))
@@ -120,7 +125,7 @@ def update(dt):
     env.render()
 
 
-pyglet.clock.schedule_interval(update, 1.0 / env.unwrapped.frame_rate)
+pyglet.clock.schedule_interval(update, 1.0 / env.unwrapped.frame_rate, [1.0 / env.unwrapped.frame_rate])
 
 # Enter main event loop
 pyglet.app.run()

@@ -1,133 +1,84 @@
-#!/usr/bin/env python
-# manual
+"""
+Construire un contrôleur pour contrôler le Duckiebot en simulation en utilisant la vrai pose
+"""
 
-"""
-This script allows you to manually control the simulator or Duckiebot
-using the keyboard arrows.
-"""
-from PIL import Image
-import argparse
+import time
 import sys
-
-import gym
+import argparse
+import math
 import numpy as np
-import pyglet
-from pyglet.window import key
-
+import gym
 from gym_duckietown.envs import DuckietownEnv
-
-last = 0
-
-# from experiments.utils import save_img
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--env-name", default=None)
 parser.add_argument("--map-name", default="udem1")
-parser.add_argument("--distortion", default=False, action="store_true")
-parser.add_argument("--camera_rand", default=False, action="store_true")
-parser.add_argument("--draw-curve", action="store_true", help="draw the lane following curve")
-parser.add_argument("--draw-bbox", action="store_true", help="draw collision detection bounding boxes")
-parser.add_argument("--domain-rand", action="store_true", help="enable domain randomization")
-parser.add_argument("--dynamics_rand", action="store_true", help="enable dynamics randomization")
-parser.add_argument("--frame-skip", default=1, type=int, help="number of frames to skip")
-parser.add_argument("--seed", default=1, type=int, help="seed")
+parser.add_argument("--no-pause", action="store_true", help="don't pause on failure")
 args = parser.parse_args()
 
-if args.env_name and args.env_name.find("Duckietown") != -1:
-    env = DuckietownEnv(
-        seed=args.seed,
-        map_name=args.map_name,
-        draw_curve=args.draw_curve,
-        draw_bbox=args.draw_bbox,
-        domain_rand=args.domain_rand,
-        frame_skip=args.frame_skip,
-        distortion=args.distortion,
-        camera_rand=args.camera_rand,
-        dynamics_rand=args.dynamics_rand,
-    )
+if args.env_name is None:
+    env = DuckietownEnv(map_name=args.map_name, domain_rand=False, draw_bbox=False)
 else:
     env = gym.make(args.env_name)
 
-env.reset()
+obs = env.reset()
 env.render()
 
+total_recompense = 0
 
-@env.unwrapped.window.event
-def on_key_press(symbol, modifiers):
-    """
-    This handler processes keyboard commands that
-    control the simulation
-    """
+last_dist = 0
+last_angel = 0
 
-    if symbol == key.BACKSPACE or symbol == key.SLASH:
-        print("RESET")
-        env.reset()
-        env.render()
-    elif symbol == key.PAGEUP:
-        env.unwrapped.cam_angle[0] = 0
-    elif symbol == key.ESCAPE:
-        env.close()
-        sys.exit(0)
+start_time = time.time()
 
-    # Take a screenshot
-    # UNCOMMENT IF NEEDED - Skimage dependency
-    # elif symbol == key.RETURN:
-    #     print('saving screenshot')
-    #     img = env.render('rgb_array')
-    #     save_img('screenshot.png', img)
+last_time = 0
 
+while True:
 
-# Register a keyboard handler
-key_handler = key.KeyStateHandler()
-env.unwrapped.window.push_handlers(key_handler)
+    lane_pose = env.get_lane_pos2(env.cur_pos, env.cur_angle)
+    distance_to_road_center = lane_pose.dist
+    angle_from_straight_in_rads = lane_pose.angle_rad
 
+    ###### Commencez à remplir le code ici.
+    # TODO: Décide comment calculer la vitesse et la direction
 
-def update(dt, *nums):
-    global last
-    
-    """
-    This function is called at every frame to handle
-    movement/stepping and redrawing
-    """
-    wheel_distance = 0.102
-    min_rad = 0.08
+    k_p = 10
+    k_p_1 = 5
+    k_d = 1
+    k_d_1 = 0.5
 
-    action = np.array([0.0, 0.0])
+    # La vitesse est une valeur entre 0 et 1 (correspond à une vitesse réelle de 0 à 1,2m/s)
 
-    line_pos = env.get_lane_pos2(env.cur_pos, env.cur_angle).angle_rad
-    print(line_pos)
+    vitesse = 0.2  # You should overwrite this value
+    # l'angle du volant, c'est-à-dire le changement d'angle de la voiture en rads/s
 
-    action[0] = 0.44
-    action[1] = 20*line_pos + 20 * (line_pos-last)/nums[0]
-    last = 20*line_pos + 20 * (line_pos-last)/nums[0]
+    timer = time.time() - last_time
 
-    obs, reward, done, info = env.step(action)
-    print("step_count = %s, reward=%.3f" % (env.unwrapped.step_count, reward))
+    braquage = (
+        k_p * distance_to_road_center + k_d * angle_from_straight_in_rads + k_p_1 * (distance_to_road_center - last_dist) / timer + k_d_1 * (angle_from_straight_in_rads - last_angel) / timer
+    )  # You should overwrite this value
 
-    
-    
- 
+    last_time = time.time()
 
-    # v2 = -10
-    
+    last_dist = distance_to_road_center
+    last_angel = angle_from_straight_in_rads
 
-    if key_handler[key.RETURN]:
+    ###### Fini à remplir le code ici
 
-        im = Image.fromarray(obs)
+    obs, recompense, fini, info = env.step([vitesse, braquage])
+    total_recompense += recompense
 
-        im.save("screen.png")
-
-    if done:
-        print("done!")
-        env.reset()
-        env.render()
+    print(
+        "étape = %s, recompense instantanée=%.3f, recompense totale=%.3f"
+        % (env.step_count, recompense, total_recompense)
+    )
 
     env.render()
 
+    if fini:
+        if recompense < 0:
+            print("*** CRASHED ***")
+        print("recompense finale = %.3f" % total_recompense)
+        break
 
-pyglet.clock.schedule_interval(update, 1.0 / env.unwrapped.frame_rate, [1.0 / env.unwrapped.frame_rate])
-
-# Enter main event loop
-pyglet.app.run()
-
-env.close()
+print("--- %s seconds ---" % (time.time() - start_time))
